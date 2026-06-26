@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         ChatGPT Compact Intelligence Selector
+// @name         ChatGPT Compact Intelligence Selector (for PLUS)
 // @namespace    local.chatgpt.compact-model-selector
-// @version      0.2.2
-// @description  Replace ChatGPT intelligence pill with compact High / Medium / Instant selector using existing DOM actions.
+// @version      0.2.3
+// @description  One-click Intelligence switcher for ChatGPT for 'Plus' subscription
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/ultda/intelligence-switcher/refs/heads/main/script.js
-// @downloadURL  https://raw.githubusercontent.com/ultda/intelligence-switcher/refs/heads/main/script.js
+// @updateURL    https://raw.githubusercontent.com/ultda/cgpt-addons/refs/heads/main/intelligence-selector.js
+// @downloadURL  https://raw.githubusercontent.com/ultda/cgpt-addons/refs/heads/main/intelligence-selector.js
 // @grant        none
 // ==/UserScript==
 
