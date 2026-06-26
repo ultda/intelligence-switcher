@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         ChatGPT Collapsible Numbered Sections
 // @namespace    https://chatgpt.com/
-// @version      1.1.0
+// @version      1.1.1
 // @description  Click numbered headings such as "1. XY..." to collapse or expand their section.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
+// @updateURL    https://raw.githubusercontent.com/ultda/cgpt-addons/refs/heads/main/collapsible-sections.js
+// @downloadURL  https://raw.githubusercontent.com/ultda/cgpt-addons/refs/heads/main/collapsible-sections.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
