@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ChatGPT Collapsible Numbered Sections
+// @name         ChatGPT Collapsible Sections
 // @namespace    https://chatgpt.com/
-// @version      1.1.1
-// @description  Click numbered headings such as "1. XY..." to collapse or expand their section.
+// @version      1.2.0
+// @description  Click any heading in ChatGPT responses to collapse or expand its section.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @updateURL    https://raw.githubusercontent.com/ultda/cgpt-addons/refs/heads/main/collapsible-sections.js
@@ -13,6 +13,7 @@
 // @run-at       document-idle
 // ==/UserScript==
 
+
 (() => {
   "use strict";
 
@@ -20,7 +21,6 @@
     '[data-message-author-role="assistant"] .markdown';
 
   const HEADING_SELECTOR = "h1, h2, h3, h4, h5, h6";
-  const NUMBERED_HEADING = /^\s*\d+[.)]\s+\S/;
   const STORAGE_PREFIX = "cgpt-collapsible-section:v1:";
   let ownerCounter = 0;
   let updateQueued = false;
@@ -215,10 +215,7 @@
   }
 
   function prepareHeading(heading, root) {
-    if (
-      heading.dataset.cgptCollapsibleReady === "true" ||
-      !NUMBERED_HEADING.test(heading.textContent ?? "")
-    ) {
+    if (heading.dataset.cgptCollapsibleReady === "true") {
       return;
     }
 
