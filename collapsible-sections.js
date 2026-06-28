@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ChatGPT Collapsible Headings & Replies
 // @namespace    https://chatgpt.com/
-// @version      1.4.0
-// @description  Collapse individual headings or entire ChatGPT assistant turns.
+// @version      1.5.0
+// @description  Collapse headings or entire replies, with optional automatic top-level compaction.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @updateURL    https://raw.githubusercontent.com/ultda/cgpt-addons/refs/heads/main/collapsible-sections.js
@@ -10,6 +10,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
+// @grant        GM_registerMenuCommand
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -43,9 +44,13 @@
 
   const SECTION_STORAGE_PREFIX = "cgpt-collapsible-section:v1:";
   const TURN_STORAGE_PREFIX = "cgpt-collapsible-turn:v1:";
+  const AUTO_COLLAPSE_SETTING_KEY =
+    "cgpt-collapsible:auto-collapse-highest-level:v1";
 
+  // ! do not change here -- change in tampermonkey settings
   let ownerCounter = 0;
   let updateQueued = false;
+  let autoCollapseHighestLevel = false;
 
   const style = document.createElement("style");
   style.textContent = `
@@ -150,6 +155,30 @@
     }
   }
 
+  function registerSettingsMenu() {
+    autoCollapseHighestLevel =
+      getStoredBoolean(AUTO_COLLAPSE_SETTING_KEY);
+
+    if (typeof GM_registerMenuCommand !== "function") {
+      return;
+    }
+
+    const stateLabel = autoCollapseHighestLevel ? "ON" : "OFF";
+
+    GM_registerMenuCommand(
+      `Auto-collapse highest-level headings: ${stateLabel}`,
+      () => {
+        GM_setValue(
+          AUTO_COLLAPSE_SETTING_KEY,
+          !autoCollapseHighestLevel
+        );
+
+        // Reload so the menu label and all rendered turns reflect the setting.
+        location.reload();
+      }
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Heading-level collapsing
   // ---------------------------------------------------------------------------
@@ -222,13 +251,14 @@
     );
   }
 
-  function readSectionCollapsed(heading, root) {
+  function readSectionState(heading, root) {
     const key = sectionStorageKey(heading, root);
 
     try {
       const saved = GM_getValue(key, null);
-      if (saved !== null) {
-        return saved === true;
+
+      if (saved === true || saved === false) {
+        return saved;
       }
     } catch {
       // Fall through to legacy localStorage migration.
@@ -236,6 +266,7 @@
 
     try {
       const legacyValue = localStorage.getItem(key);
+
       if (legacyValue === "1") {
         GM_setValue(key, true);
         localStorage.removeItem(key);
@@ -245,7 +276,20 @@
       // No persisted value is valid.
     }
 
-    return false;
+    return null;
+  }
+
+  function writeSectionState(heading, root, collapsed) {
+    try {
+      // Store both true and false so a manual expansion is distinguishable
+      // from a heading that has never been touched.
+      GM_setValue(
+        sectionStorageKey(heading, root),
+        Boolean(collapsed)
+      );
+    } catch {
+      // The current-page interaction still works if storage is unavailable.
+    }
   }
 
   function applyHeadingState(heading) {
@@ -275,17 +319,25 @@
       : "Click to collapse this section";
   }
 
-  function setHeadingCollapsed(heading, collapsed, persist = true) {
+  function setHeadingCollapsed(
+    heading,
+    collapsed,
+    persist = true,
+    userInitiated = false
+  ) {
     const root = heading.closest(MARKDOWN_ROOT_SELECTOR);
     if (!root) return;
 
     heading.dataset.cgptCollapsed = String(collapsed);
 
+    if (userInitiated) {
+      heading.dataset.cgptHasStoredState = "true";
+      heading.dataset.cgptManualState = "true";
+      delete heading.dataset.cgptAutoCollapsed;
+    }
+
     if (persist) {
-      writeStoredBoolean(
-        sectionStorageKey(heading, root),
-        collapsed
-      );
+      writeSectionState(heading, root, collapsed);
     }
 
     applyHeadingState(heading);
@@ -307,7 +359,9 @@
 
       setHeadingCollapsed(
         heading,
-        heading.dataset.cgptCollapsed !== "true"
+        heading.dataset.cgptCollapsed !== "true",
+        true,
+        true
       );
     });
 
@@ -317,15 +371,94 @@
       event.preventDefault();
       setHeadingCollapsed(
         heading,
-        heading.dataset.cgptCollapsed !== "true"
+        heading.dataset.cgptCollapsed !== "true",
+        true,
+        true
       );
     });
 
+    const savedState = readSectionState(heading, root);
+
+    heading.dataset.cgptHasStoredState =
+      String(savedState !== null);
+
     setHeadingCollapsed(
       heading,
-      readSectionCollapsed(heading, root),
+      savedState ?? false,
+      false,
       false
     );
+  }
+
+  function turnHeadings(turn) {
+    return [...turn.querySelectorAll(HEADING_SELECTOR)].filter(
+      (heading) =>
+        heading.matches(".cgpt-collapsible-heading") &&
+        heading.closest(MARKDOWN_ROOT_SELECTOR)
+    );
+  }
+
+  function applyAutomaticHighestLevelCollapse(turn) {
+    const headings = turnHeadings(turn);
+    if (headings.length === 0) return;
+
+    /*
+     * "Highest order" means the smallest heading number present:
+     * H1 before H2, H2 before H3, and so on.
+     */
+    const highestLevel = Math.min(
+      ...headings.map(headingLevel)
+    );
+
+    headings.forEach((heading) => {
+      const hasStoredState =
+        heading.dataset.cgptHasStoredState === "true";
+
+      const wasManuallyChanged =
+        heading.dataset.cgptManualState === "true";
+
+      const isHighestLevel =
+        headingLevel(heading) === highestLevel;
+
+      if (
+        autoCollapseHighestLevel &&
+        isHighestLevel &&
+        !hasStoredState &&
+        !wasManuallyChanged
+      ) {
+        heading.dataset.cgptAutoCollapsed = "true";
+
+        setHeadingCollapsed(
+          heading,
+          true,
+          false,
+          false
+        );
+
+        return;
+      }
+
+      /*
+       * During streaming, an H2 may appear before a later H1. If the H2 was
+       * collapsed only by the automatic rule, expand it again once H1 becomes
+       * the actual highest level.
+       */
+      if (
+        heading.dataset.cgptAutoCollapsed === "true" &&
+        (!autoCollapseHighestLevel || !isHighestLevel) &&
+        !hasStoredState &&
+        !wasManuallyChanged
+      ) {
+        delete heading.dataset.cgptAutoCollapsed;
+
+        setHeadingCollapsed(
+          heading,
+          false,
+          false,
+          false
+        );
+      }
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -377,6 +510,21 @@
     });
   }
 
+  function hasMeaningfulAssistantContent(container) {
+    return [...container.querySelectorAll(MESSAGE_SELECTOR)].some((message) => {
+      const hasText = (message.textContent ?? "").trim().length > 0;
+
+      const hasRichContent = Boolean(
+        message.querySelector(
+          "img, video, audio, canvas, svg, table, pre, " +
+          "[data-writing-block], [data-testid='writing-block-container']"
+        )
+      );
+
+      return hasText || hasRichContent;
+    });
+  }
+
   function prepareTurn(turn) {
     const container = turn.querySelector(TURN_CONTENT_SELECTOR);
     if (!container) return;
@@ -388,6 +536,21 @@
     removeLegacyPerMessageButtons(turn);
 
     container.classList.add("cgpt-turn-content");
+
+    /*
+     * ChatGPT can keep empty assistant-turn placeholders in the thread.
+     * Do not attach a control until the turn contains an actual assistant
+     * message. The MutationObserver will call this again when content arrives.
+     */
+    if (!hasMeaningfulAssistantContent(container)) {
+      container
+        .querySelector(":scope > .cgpt-turn-toggle")
+        ?.remove();
+
+      delete container.dataset.cgptTurnReady;
+      delete container.dataset.cgptTurnCollapsed;
+      return;
+    }
 
     let button = container.querySelector(":scope > .cgpt-turn-toggle");
 
@@ -432,7 +595,9 @@
   function update() {
     updateQueued = false;
 
-    document.querySelectorAll(TURN_SELECTOR).forEach(prepareTurn);
+    const turns = [...document.querySelectorAll(TURN_SELECTOR)];
+
+    turns.forEach(prepareTurn);
 
     document.querySelectorAll(MARKDOWN_ROOT_SELECTOR).forEach((root) => {
       root.querySelectorAll(HEADING_SELECTOR).forEach((heading) => {
@@ -443,6 +608,8 @@
         .querySelectorAll(".cgpt-collapsible-heading")
         .forEach(applyHeadingState);
     });
+
+    turns.forEach(applyAutomaticHighestLevelCollapse);
   }
 
   function queueUpdate() {
@@ -451,6 +618,8 @@
     updateQueued = true;
     requestAnimationFrame(update);
   }
+
+  registerSettingsMenu();
 
   new MutationObserver(queueUpdate).observe(document.body, {
     childList: true,
